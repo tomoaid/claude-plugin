@@ -92,7 +92,11 @@ def main() -> int:
             self.wfile.write(b'{"ok": true}')
             saved.set()
 
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
+    try:
+        server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
+    except OSError as e:
+        print(f"error: cannot bind port {args.port} ({e.strerror}) — try another, e.g. --port {args.port + 1}", file=sys.stderr)
+        return 2
     threading.Thread(target=server.serve_forever, daemon=True).start()
     print(f"labeling UI → http://127.0.0.1:{args.port}/", file=sys.stderr, flush=True)
 

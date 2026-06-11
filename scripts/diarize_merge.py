@@ -174,7 +174,10 @@ def whisper_transcribe(audio: Path, api_key: str, language: str | None, offset: 
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
         raise RuntimeError(f"whisper failed: {proc.stdout}\n{proc.stderr}")
-    data = json.loads(proc.stdout)
+    try:
+        data = json.loads(proc.stdout)
+    except json.JSONDecodeError as e:
+        raise RuntimeError(f"Bad JSON from API: {proc.stdout[:500]}") from e
     segments = [
         {"start": s["start"] + offset, "end": s["end"] + offset, "text": s["text"].strip()}
         for s in data.get("segments") or []
@@ -323,7 +326,7 @@ def main() -> int:
     parser.add_argument("--voiceprints", type=Path, required=True, help="聲紋庫 JSON（{label: voiceprint_b64}）")
     parser.add_argument("--out", type=Path, help="Output transcript path (default: stdout)")
     parser.add_argument("--raw-out", type=Path, help="Optional: dump raw identify + ASR JSON")
-    parser.add_argument("--language", default="zh")
+    parser.add_argument("--language", help="ISO-639-1，如 zh / en；不傳由模型自動偵測")
     parser.add_argument("--prompt", default="", help="ASR 詞彙/風格 priming 文字")
     parser.add_argument("--prompt-file", type=Path, help="從檔案讀 priming 文字（接在 --prompt 後）")
     args = parser.parse_args()
@@ -350,6 +353,9 @@ def main() -> int:
         base_prompt = compose_prompt(base_prompt, args.prompt_file.read_text(encoding="utf-8"))
 
     voiceprints = json.loads(args.voiceprints.read_text(encoding="utf-8"))
+    if not voiceprints:
+        log(f"error: voiceprints file is empty: {args.voiceprints}（先跑 voiceprint-setup 建立聲紋庫）")
+        return 2
     log(f"loaded {len(voiceprints)} voiceprints: {list(voiceprints)}")
     duration = probe_duration(args.audio)
     log(f"audio: {args.audio.name}, {duration:.0f}s, {args.audio.stat().st_size / 1024 / 1024:.1f} MB")
