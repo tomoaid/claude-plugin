@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>聲紋標記 — voiceprint setup</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, "PingFang TC", "Noto Sans TC", sans-serif;
+         margin: 0; background: #f4f5f7; color: #1c1e21; }
+  .wrap { max-width: 640px; margin: 0 auto; padding: 32px 20px 80px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  p.hint { color: #5f6368; font-size: 14px; margin: 0 0 24px; line-height: 1.6; }
+  .card { background: #fff; border: 1px solid #e0e2e6; border-radius: 12px;
+          padding: 16px 18px; margin-bottom: 14px; }
+  .card h2 { font-size: 15px; margin: 0 0 2px; font-family: ui-monospace, monospace; }
+  .meta { font-size: 12.5px; color: #5f6368; margin-bottom: 10px; }
+  audio { width: 100%; height: 36px; margin-bottom: 12px; }
+  .row { display: flex; gap: 10px; align-items: center; }
+  input[type=text] { flex: 1; font-size: 15px; padding: 8px 10px;
+          border: 1px solid #c8cad0; border-radius: 8px; }
+  input[type=text]:disabled { background: #f0f1f3; color: #9aa0a6; }
+  label.skip { font-size: 13.5px; color: #5f6368; white-space: nowrap;
+          display: flex; align-items: center; gap: 4px; cursor: pointer; }
+  .footer { position: fixed; left: 0; right: 0; bottom: 0; background: #fff;
+          border-top: 1px solid #e0e2e6; padding: 12px 20px; }
+  .footer-inner { max-width: 640px; margin: 0 auto; display: flex;
+          gap: 14px; align-items: center; }
+  button { font-size: 15px; font-weight: 600; padding: 10px 26px; border: 0;
+          border-radius: 8px; background: #1a73e8; color: #fff; cursor: pointer; }
+  button:disabled { background: #9aa0a6; cursor: default; }
+  #status { font-size: 13.5px; color: #5f6368; }
+  #status.err { color: #d93025; }
+  #status.ok { color: #188038; font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>聲紋標記</h1>
+  <p class="hint">逐一試聽每段樣本，填上對應成員的<strong>英文名</strong>（例：Alice、Bob，全團隊用一致的拼法）。
+  不是團隊成員、雜訊、或同一人重複出現的多餘片段，勾「略過」。標完按下方「儲存」。</p>
+  <div id="cards"></div>
+</div>
+<div class="footer"><div class="footer-inner">
+  <button id="save">儲存</button>
+  <span id="status"></span>
+</div></div>
+<datalist id="team"></datalist>
+<script>
+const MANIFEST = __MANIFEST__;
+const TEAM = __TEAM__;
+
+const dl = document.getElementById('team');
+TEAM.forEach(n => { const o = document.createElement('option'); o.value = n; dl.appendChild(o); });
+
+const cards = document.getElementById('cards');
+MANIFEST.speakers.forEach(sp => {
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.innerHTML = `
+    <h2>${sp.id}</h2>
+    <div class="meta">總發言 ${sp.total_speech_seconds}s ・ 樣本 ${sp.clip_seconds}s ・ 取自 ${sp.sample_times.join('、')}</div>
+    <audio controls preload="metadata" src="/${sp.clip}"></audio>
+    <div class="row">
+      <input type="text" list="team" placeholder="成員英文名（如 Alice）" data-id="${sp.id}" autocomplete="off">
+      <label class="skip"><input type="checkbox" data-skip="${sp.id}">略過</label>
+    </div>`;
+  cards.appendChild(card);
+});
+
+cards.addEventListener('change', e => {
+  if (e.target.dataset.skip !== undefined) {
+    const input = cards.querySelector(`input[data-id="${e.target.dataset.skip}"]`);
+    input.disabled = e.target.checked;
+    if (e.target.checked) input.value = '';
+  }
+});
+
+const status = document.getElementById('status');
+document.getElementById('save').addEventListener('click', async () => {
+  const labels = {};
+  const dup = new Set(), seen = new Set();
+  let unfilled = 0;
+  MANIFEST.speakers.forEach(sp => {
+    const skipped = cards.querySelector(`input[data-skip="${sp.id}"]`).checked;
+    const name = cards.querySelector(`input[data-id="${sp.id}"]`).value.trim();
+    if (skipped || !name) { labels[sp.id] = null; if (!skipped) unfilled++; return; }
+    if (seen.has(name)) dup.add(name); seen.add(name);
+    labels[sp.id] = name;
+  });
+  status.className = 'err';
+  if (dup.size) { status.textContent = `「${[...dup].join('、')}」被標了不只一次 — 同一人只標樣本最長的那段，其餘請勾略過`; return; }
+  if (unfilled) { status.textContent = `還有 ${unfilled} 段沒填名字也沒勾略過`; return; }
+  if (!Object.values(labels).some(v => v)) { status.textContent = '至少要標記一位成員'; return; }
+  const btn = document.getElementById('save');
+  btn.disabled = true;
+  try {
+    const resp = await fetch('/save', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ labels }) });
+    if (!resp.ok) throw new Error(await resp.text());
+    status.className = 'ok';
+    status.textContent = '已儲存 ✓ 可以關閉此分頁，回到終端機繼續。';
+  } catch (err) {
+    btn.disabled = false;
+    status.className = 'err';
+    status.textContent = '儲存失敗：' + err.message;
+  }
+});
+</script>
+</body>
+</html>

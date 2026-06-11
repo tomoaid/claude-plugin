@@ -1,0 +1,14 @@
+{
+  "name": "tomoaid",
+  "owner": {
+    "name": "TomoAid"
+  },
+  "description": "TomoAid 會議錄音工作流 plugin",
+  "plugins": [
+    {
+      "name": "tomoaid",
+      "source": "./",
+      "description": "meeting-notes（會議錄音 → speaker-labeled 逐字稿 → 會議記錄 .md）、voiceprint-setup（建立團隊聲紋庫）"
+    }
+  ]
+}

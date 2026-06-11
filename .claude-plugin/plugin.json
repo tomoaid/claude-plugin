@@ -1,0 +1,12 @@
+{
+  "name": "tomoaid",
+  "displayName": "TomoAid Meeting Tools",
+  "version": "0.1.0",
+  "description": "會議錄音工作流 plugin。meeting-notes：錄音 → 聲紋識別 speaker-labeled 逐字稿 → 結構化會議記錄 .md（產出到本地檔案為止）。voiceprint-setup：diarization 切出 speaker 樣本 → 本地 HTML 介面標記 → 建立團隊聲紋庫。需要 OpenAI 與 pyannote.ai API key。",
+  "author": {
+    "name": "TomoAid"
+  },
+  "repository": "https://github.com/tomoaid/claude-plugin",
+  "license": "MIT",
+  "keywords": ["meeting", "transcription", "diarization", "voiceprint", "speech-to-text"]
+}
