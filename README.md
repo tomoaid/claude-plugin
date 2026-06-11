@@ -24,11 +24,33 @@
 /plugin install tomoaid@tomoaid
 ```
 
+安裝時可選 **Project scope**，plugin 只在當前專案啟用。
+
+### 團隊安裝（project scope）
+
+要讓隊友 clone 專案後自動啟用、且只在該專案生效，把這段提交進該專案的 `.claude/settings.json`：
+
+```json
+{
+  "extraKnownMarketplaces": {
+    "tomoaid": {
+      "source": { "source": "github", "repo": "tomoaid/claude-plugin" }
+    }
+  },
+  "enabledPlugins": {
+    "tomoaid@tomoaid": true
+  }
+}
+```
+
+隊友信任（trust）該專案資料夾後，Claude Code 會提示安裝 marketplace 與 plugin，不影響其他專案。
+
 ### 需求
 
 - `OPENAI_API_KEY`（whisper-1 / gpt-4o-transcribe 轉錄）
 - `PYANNOTEAI_API_KEY`（diarization 與 voiceprint，https://pyannote.ai）
 - `ffmpeg` / `ffprobe`（`brew install ffmpeg`）
+- `curl`（macOS / 多數 Linux 內建，OpenAI 上傳用）
 - Python 3.10+（僅用標準庫，無需 pip install）
 
 ## 使用

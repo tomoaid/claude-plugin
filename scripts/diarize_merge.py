@@ -4,9 +4,9 @@
 Pipeline:
   1. Upload local audio to pyannote temp storage
   2. POST /v1/identify with team voiceprints (exclusive=true) → jobId
-  3. Poll /v1/jobs/{jobId} until succeeded → speaker-labeled time segments
-  4. Send audio to OpenAI whisper-1 (verbose_json, word+segment timestamps)
-  5. Merge: word-level speaker assignment — one ASR segment spanning a speaker
+  3. Send audio to OpenAI whisper-1 (verbose_json, word+segment timestamps)
+     while the identify job runs, then poll /v1/jobs/{jobId} until succeeded
+  4. Merge: word-level speaker assignment — one ASR segment spanning a speaker
      change is split at the word boundary; segments with zero overlap against
      any pyannote speech region are flagged as suspected hallucination
      (pyannote 未偵測到語音), not silently kept or dropped
@@ -46,6 +46,7 @@ POLL_TIMEOUT_SEC = 600
 WHISPER_MAX_BYTES = 25 * 1024 * 1024
 CHUNK_SECONDS = 600
 CONTEXT_TAIL_CHARS = 300  # 切段模式下，附給下一段當上下文的前段結尾長度
+RETRY_SLEEP_SEC = 5  # curl 網路層錯誤的單次重試間隔
 
 
 def log(msg: str) -> None:
@@ -101,7 +102,7 @@ def upload_to_pyannote(api_key: str, audio: Path) -> str:
     return media_uri
 
 
-def identify(api_key: str, media_uri: str, voiceprints: dict[str, str]) -> list[dict]:
+def create_identify_job(api_key: str, media_uri: str, voiceprints: dict[str, str]) -> str:
     payload = {
         "url": media_uri,
         "voiceprints": [{"label": name, "voiceprint": vp} for name, vp in voiceprints.items()],
@@ -112,7 +113,11 @@ def identify(api_key: str, media_uri: str, voiceprints: dict[str, str]) -> list[
     job_id = resp.get("jobId")
     if not job_id:
         raise RuntimeError(f"no jobId: {resp}")
-    log(f"polling job {job_id}…")
+    return job_id
+
+
+def poll_identify(api_key: str, job_id: str) -> list[dict]:
+    log(f"polling identify job {job_id}…")
     deadline = time.monotonic() + POLL_TIMEOUT_SEC
     while True:
         job = http_json("GET", f"{PYANNOTE_BASE}/jobs/{job_id}", api_key=api_key)
@@ -146,7 +151,13 @@ def split_for_whisper(audio: Path, tmp_dir: Path) -> list[tuple[Path, float]]:
         check=True,
     )
     chunks = sorted(tmp_dir.glob("chunk_*.mp3"))
-    return [(c, i * CHUNK_SECONDS) for i, c in enumerate(chunks)]
+    # offset 用實際長度累加 — segment muxer 在 frame 邊界切，每段不會剛好 CHUNK_SECONDS
+    result: list[tuple[Path, float]] = []
+    offset = 0.0
+    for c in chunks:
+        result.append((c, offset))
+        offset += probe_duration(c)
+    return result
 
 
 def compose_prompt(base: str, prev_tail: str) -> str:
@@ -158,8 +169,8 @@ def compose_prompt(base: str, prev_tail: str) -> str:
 def whisper_transcribe(audio: Path, api_key: str, language: str | None, offset: float = 0.0, prompt: str = "") -> tuple[list[dict], list[dict]]:
     cmd = [
         "curl", "-sS", "--fail-with-body",
+        "--config", "-",  # Authorization 走 stdin，key 不進 ps 可見的 argv
         "-X", "POST", OPENAI_TRANSCRIBE_URL,
-        "-H", f"Authorization: Bearer {api_key}",
         "-F", f"file=@{audio}",
         "-F", "model=whisper-1",
         "-F", "response_format=verbose_json",
@@ -171,7 +182,12 @@ def whisper_transcribe(audio: Path, api_key: str, language: str | None, offset: 
     if prompt:
         # --form-string：值不做 @ / < / ;type 解析，中文與標點安全
         cmd += ["--form-string", f"prompt={prompt}"]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    curl_cfg = f'header = "Authorization: Bearer {api_key}"\n'
+    proc = subprocess.run(cmd, capture_output=True, text=True, input=curl_cfg)
+    if proc.returncode not in (0, 22):  # 22 = HTTP error（原樣回報不重試）；其餘是網路層，重試一次
+        log(f"curl network error (exit {proc.returncode}), retrying in {RETRY_SLEEP_SEC}s…")
+        time.sleep(RETRY_SLEEP_SEC)
+        proc = subprocess.run(cmd, capture_output=True, text=True, input=curl_cfg)
     if proc.returncode != 0:
         raise RuntimeError(f"whisper failed: {proc.stdout}\n{proc.stderr}")
     try:
@@ -361,10 +377,11 @@ def main() -> int:
     log(f"audio: {args.audio.name}, {duration:.0f}s, {args.audio.stat().st_size / 1024 / 1024:.1f} MB")
 
     media_uri = upload_to_pyannote(pyannote_key, args.audio)
-    dia_segments = identify(pyannote_key, media_uri, voiceprints)
-    log("running whisper ASR…")
+    job_id = create_identify_job(pyannote_key, media_uri, voiceprints)
+    log("running whisper ASR while identify job runs…")
     asr_segments, asr_words = asr_with_timestamps(args.audio, openai_key, args.language, base_prompt)
     log(f"whisper done: {len(asr_segments)} segments, {len(asr_words)} words")
+    dia_segments = poll_identify(pyannote_key, job_id)
 
     merged = merge(asr_segments, dia_segments, asr_words)
     transcript = render_transcript(merged)

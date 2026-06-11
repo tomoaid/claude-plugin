@@ -27,6 +27,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 API_URL = "https://api.openai.com/v1/audio/transcriptions"
@@ -36,6 +37,7 @@ MAX_CHUNK_BYTES = 24 * 1024 * 1024
 MAX_CHUNK_SECONDS = 1380
 CHUNK_SECONDS = 600  # 10 分鐘
 CONTEXT_TAIL_CHARS = 300  # 切段模式下，附給下一段當上下文的前段結尾長度
+RETRY_SLEEP_SEC = 5  # curl 網路層錯誤的單次重試間隔
 
 
 def log(msg: str) -> None:
@@ -85,8 +87,8 @@ def compose_prompt(base: str, prev_tail: str) -> str:
 def transcribe_one(path: str, api_key: str, language: str | None, prompt: str = "") -> str:
     cmd = [
         "curl", "-sS", "--fail-with-body",
+        "--config", "-",  # Authorization 走 stdin，key 不進 ps 可見的 argv
         "-X", "POST", API_URL,
-        "-H", f"Authorization: Bearer {api_key}",
         "-F", f"file=@{path}",
         "-F", f"model={MODEL}",
     ]
@@ -96,7 +98,12 @@ def transcribe_one(path: str, api_key: str, language: str | None, prompt: str = 
         # --form-string：值不做 @ / < / ;type 解析，中文與標點安全
         cmd += ["--form-string", f"prompt={prompt}"]
 
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    curl_cfg = f'header = "Authorization: Bearer {api_key}"\n'
+    proc = subprocess.run(cmd, capture_output=True, text=True, input=curl_cfg)
+    if proc.returncode not in (0, 22):  # 22 = HTTP error（原樣回報不重試）；其餘是網路層，重試一次
+        log(f"curl 網路層錯誤（exit {proc.returncode}），{RETRY_SLEEP_SEC}s 後重試一次…")
+        time.sleep(RETRY_SLEEP_SEC)
+        proc = subprocess.run(cmd, capture_output=True, text=True, input=curl_cfg)
     if proc.returncode != 0:
         raise RuntimeError(
             f"OpenAI API failed (exit {proc.returncode}):\n"
