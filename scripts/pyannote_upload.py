@@ -15,6 +15,7 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.request
 from pathlib import Path
 
@@ -52,9 +53,8 @@ def upload_file(presigned_url: str, file_path: Path) -> None:
         headers={"Content-Type": "application/octet-stream"},
         data=data,
     )
-    with urllib.request.urlopen(req) as resp:
-        if resp.status >= 300:
-            raise RuntimeError(f"upload failed: HTTP {resp.status}")
+    with urllib.request.urlopen(req):
+        pass  # 非 2xx urlopen 會自己 raise HTTPError
 
 
 def main() -> int:
@@ -63,7 +63,7 @@ def main() -> int:
     parser.add_argument(
         "object_key",
         nargs="?",
-        help="Object key (default: slugified filename). Must be unique per team.",
+        help="Object key (default: slugified filename + timestamp). Must be unique per team.",
     )
     args = parser.parse_args()
 
@@ -75,7 +75,7 @@ def main() -> int:
         print(f"error: file not found: {args.file}", file=sys.stderr)
         return 2
 
-    object_key = args.object_key or slugify(args.file.stem)
+    object_key = args.object_key or slugify(f"{args.file.stem}-{int(time.time())}")
     media_uri = f"media://{object_key}"
 
     print(f"→ creating presigned URL for {media_uri}", file=sys.stderr)

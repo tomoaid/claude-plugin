@@ -162,7 +162,7 @@ def cut_concat(audio: Path, picked: list[dict], out_wav: Path, tmp_dir: Path) ->
 def fmt_time(seconds: float) -> str:
     m, s = divmod(int(seconds), 60)
     h, m = divmod(m, 60)
-    return f"{h:02d}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
+    return f"{h:02d}:{m:02d}:{s:02d}"
 
 
 def main() -> int:

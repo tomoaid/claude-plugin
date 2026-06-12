@@ -248,7 +248,7 @@ def merge(asr_segments: list[dict], dia_segments: list[dict]) -> list[dict]:
 def fmt_time(seconds: float) -> str:
     m, s = divmod(int(seconds), 60)
     h, m = divmod(m, 60)
-    return f"{h:02d}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
+    return f"{h:02d}:{m:02d}:{s:02d}"
 
 
 NO_SPEECH_MARK = "⚠ 無語音區段（疑似 ASR 幻覺，清理時預設刪除）"
