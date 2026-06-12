@@ -9,7 +9,8 @@
 - 都沒超標就直接單檔送出
 - --prompt / --prompt-file 提供詞彙 priming（人名、產品名、術語；用繁體寫可同時
   把輸出偏向繁體）。切段模式下，每段的 prompt 會自動附上前一段轉錄結尾，
-  維持跨段上下文連續性
+  維持跨段上下文連續性；總量控制在 224 tokens 內，詞彙表優先完整保留
+  （見 _common.compose_prompt）
 - 每段都會印一行進度到 stderr，方便上層觀察
 
 用法：
@@ -30,6 +31,8 @@ import tempfile
 import time
 from pathlib import Path
 
+from _common import compose_prompt, probe_duration
+
 API_URL = "https://api.openai.com/v1/audio/transcriptions"
 MODEL = "gpt-4o-transcribe"
 MAX_CHUNK_BYTES = 24 * 1024 * 1024
@@ -42,19 +45,6 @@ RETRY_SLEEP_SEC = 5  # curl 網路層錯誤的單次重試間隔
 
 def log(msg: str) -> None:
     print(f"[transcribe] {msg}", file=sys.stderr, flush=True)
-
-
-def probe_duration(src: str) -> float:
-    proc = subprocess.run(
-        [
-            "ffprobe", "-v", "error",
-            "-show_entries", "format=duration",
-            "-of", "csv=p=0",
-            src,
-        ],
-        capture_output=True, text=True, check=True,
-    )
-    return float(proc.stdout.strip())
 
 
 def split_audio(src: str, out_dir: str) -> list[str]:
@@ -76,12 +66,6 @@ def split_audio(src: str, out_dir: str) -> list[str]:
     )
     chunks = sorted(Path(out_dir).glob("chunk_*.mp3"))
     return [str(c) for c in chunks]
-
-
-def compose_prompt(base: str, prev_tail: str) -> str:
-    """詞彙表 + 前一段結尾。兩者都可為空。"""
-    parts = [p for p in (base.strip(), prev_tail.strip()) if p]
-    return "\n".join(parts)
 
 
 def transcribe_one(path: str, api_key: str, language: str | None, prompt: str = "") -> str:
@@ -127,12 +111,13 @@ def main() -> int:
     parser.add_argument("--prompt-file", type=Path, help="從檔案讀 priming 文字（接在 --prompt 後）")
     args = parser.parse_args()
 
-    base_prompt = args.prompt
+    base_prompt = args.prompt.strip()
     if args.prompt_file:
         if not args.prompt_file.is_file():
             print(f"ERROR: 找不到 prompt 檔 {args.prompt_file}", file=sys.stderr)
             return 2
-        base_prompt = compose_prompt(base_prompt, args.prompt_file.read_text(encoding="utf-8"))
+        glossary = args.prompt_file.read_text(encoding="utf-8").strip()
+        base_prompt = "\n".join(p for p in (base_prompt, glossary) if p)
 
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:

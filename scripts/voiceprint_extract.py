@@ -20,17 +20,13 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import subprocess
 import sys
 import time
-import urllib.error
-import urllib.request
 from pathlib import Path
 
-PYANNOTE_BASE = "https://api.pyannote.ai/v1"
-POLL_INTERVAL_SEC = 3
-POLL_TIMEOUT_SEC = 600
+from _common import PYANNOTE_BASE, fmt_time, http_json, poll_job, probe_duration, slugify, upload_to_pyannote
+
 EDGE_TRIM_SEC = 0.1  # shave segment edges to avoid bleed from adjacent speakers
 MIN_SEGMENT_SEC = 1.0
 
@@ -39,45 +35,10 @@ def log(msg: str) -> None:
     print(f"[voiceprint_extract] {msg}", file=sys.stderr, flush=True)
 
 
-def slugify(name: str) -> str:
-    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", name).strip("-")
-    return slug or "audio"
-
-
-def http_json(method: str, url: str, *, api_key: str | None = None, body: dict | bytes | None = None, content_type: str | None = None) -> dict:
-    headers = {}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
-    data = None
-    if isinstance(body, dict):
-        data = json.dumps(body).encode("utf-8")
-        headers["Content-Type"] = "application/json"
-    elif isinstance(body, (bytes, bytearray)):
-        data = body
-        if content_type:
-            headers["Content-Type"] = content_type
-    req = urllib.request.Request(url, method=method, headers=headers, data=data)
-    try:
-        with urllib.request.urlopen(req) as resp:
-            raw = resp.read()
-            if not raw:
-                return {}
-            return json.loads(raw.decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        detail = e.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"{method} {url} → HTTP {e.code}: {detail}") from None
-
-
-def upload_to_pyannote(api_key: str, audio: Path) -> str:
+def upload_audio(api_key: str, audio: Path) -> str:
     object_key = slugify(f"vpsetup-{audio.stem}-{int(time.time())}")
-    media_uri = f"media://{object_key}"
-    resp = http_json("POST", f"{PYANNOTE_BASE}/media/input", api_key=api_key, body={"url": media_uri})
-    presigned = resp.get("url") or resp.get("presigned_url")
-    if not presigned:
-        raise RuntimeError(f"no presigned URL: {resp}")
-    log(f"uploading {audio.name} ({audio.stat().st_size / 1024 / 1024:.1f} MB) → {media_uri}")
-    http_json("PUT", presigned, body=audio.read_bytes(), content_type="application/octet-stream")
-    return media_uri
+    log(f"uploading {audio.name} ({audio.stat().st_size / 1024 / 1024:.1f} MB) → media://{object_key}")
+    return upload_to_pyannote(api_key, audio, object_key)
 
 
 def diarize(api_key: str, media_uri: str) -> list[dict]:
@@ -86,21 +47,14 @@ def diarize(api_key: str, media_uri: str) -> list[dict]:
     if not job_id:
         raise RuntimeError(f"no jobId: {resp}")
     log(f"polling diarize job {job_id}…")
-    deadline = time.monotonic() + POLL_TIMEOUT_SEC
-    while True:
-        job = http_json("GET", f"{PYANNOTE_BASE}/jobs/{job_id}", api_key=api_key)
-        status = job.get("status")
-        if status == "succeeded":
-            segments = (job.get("output") or {}).get("diarization")
-            if not segments:
-                raise RuntimeError(f"succeeded job has no diarization: {job}")
-            log(f"diarize done: {len(segments)} segments")
-            return segments
-        if status in ("failed", "canceled"):
-            raise RuntimeError(f"diarize job ended with status={status}: {job}")
-        if time.monotonic() > deadline:
-            raise TimeoutError(f"diarize job {job_id} timed out (last status: {status})")
-        time.sleep(POLL_INTERVAL_SEC)
+    job = poll_job(api_key, job_id)
+    if job["status"] != "succeeded":
+        raise RuntimeError(f"diarize job ended with status={job['status']}: {job}")
+    segments = (job.get("output") or {}).get("diarization")
+    if not segments:
+        raise RuntimeError(f"succeeded job has no diarization: {job}")
+    log(f"diarize done: {len(segments)} segments")
+    return segments
 
 
 def select_segments(segments: list[dict], max_total: float) -> list[dict]:
@@ -152,17 +106,7 @@ def cut_concat(audio: Path, picked: list[dict], out_wav: Path, tmp_dir: Path) ->
          "-i", str(concat_list), "-c", "copy", str(out_wav)],
         check=True,
     )
-    out = subprocess.check_output(
-        ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(out_wav)],
-        text=True,
-    )
-    return float(out.strip())
-
-
-def fmt_time(seconds: float) -> str:
-    m, s = divmod(int(seconds), 60)
-    h, m = divmod(m, 60)
-    return f"{h:02d}:{m:02d}:{s:02d}"
+    return probe_duration(out_wav)
 
 
 def main() -> int:
@@ -185,7 +129,7 @@ def main() -> int:
     clips_dir.mkdir(parents=True, exist_ok=True)
     tmp_dir.mkdir(parents=True, exist_ok=True)
 
-    media_uri = upload_to_pyannote(api_key, args.audio)
+    media_uri = upload_audio(api_key, args.audio)
     segments = diarize(api_key, media_uri)
 
     by_speaker: dict[str, list[dict]] = {}

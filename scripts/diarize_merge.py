@@ -12,8 +12,9 @@ Pipeline:
      not silently kept or dropped
 
 --prompt / --prompt-file primes whisper with names/jargon (寫繁體可同時把輸出
-偏向繁體). whisper-1 只取 prompt 的最後 224 tokens；切段模式下每段 prompt 會
-附上前段轉錄結尾，越近的內容越優先保留。
+偏向繁體). whisper-1 只取 prompt 的最後 224 tokens；切段模式下每段 prompt =
+詞彙表 + 前段轉錄結尾，總量控制在 224 tokens 內——詞彙表優先完整保留，
+前段結尾依剩餘預算裁切（見 _common.compose_prompt）。
 
 Usage:
   PYANNOTEAI_API_KEY=... OPENAI_API_KEY=... \\
@@ -31,21 +32,26 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import subprocess
 import sys
 import time
-import urllib.error
-import urllib.request
 from pathlib import Path
 
-PYANNOTE_BASE = "https://api.pyannote.ai/v1"
+from _common import (
+    PYANNOTE_BASE,
+    compose_prompt,
+    fmt_time,
+    http_json,
+    poll_job,
+    probe_duration,
+    slugify,
+    upload_to_pyannote,
+)
+
 OPENAI_TRANSCRIBE_URL = "https://api.openai.com/v1/audio/transcriptions"
-POLL_INTERVAL_SEC = 3
-POLL_TIMEOUT_SEC = 600
 WHISPER_MAX_BYTES = 25 * 1024 * 1024
 CHUNK_SECONDS = 600
-CONTEXT_TAIL_CHARS = 300  # 切段模式下，附給下一段當上下文的前段結尾長度
+CONTEXT_TAIL_CHARS = 300  # prev tail 的字元預上限；進 prompt 前 compose_prompt 還會依 token 預算裁切
 RETRY_SLEEP_SEC = 5  # curl 網路層錯誤的單次重試間隔
 
 
@@ -53,53 +59,10 @@ def log(msg: str) -> None:
     print(f"[diarize_merge] {msg}", file=sys.stderr, flush=True)
 
 
-def slugify(name: str) -> str:
-    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", name).strip("-")
-    return slug or "audio"
-
-
-def http_json(method: str, url: str, *, api_key: str | None = None, body: dict | bytes | None = None, content_type: str | None = None) -> dict:
-    headers = {}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
-    data = None
-    if isinstance(body, dict):
-        data = json.dumps(body).encode("utf-8")
-        headers["Content-Type"] = "application/json"
-    elif isinstance(body, (bytes, bytearray)):
-        data = body
-        if content_type:
-            headers["Content-Type"] = content_type
-    req = urllib.request.Request(url, method=method, headers=headers, data=data)
-    try:
-        with urllib.request.urlopen(req) as resp:
-            raw = resp.read()
-            if not raw:
-                return {}
-            return json.loads(raw.decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        detail = e.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"{method} {url} → HTTP {e.code}: {detail}") from None
-
-
-def probe_duration(path: Path) -> float:
-    out = subprocess.check_output(
-        ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)],
-        text=True,
-    )
-    return float(out.strip())
-
-
-def upload_to_pyannote(api_key: str, audio: Path) -> str:
+def upload_audio(api_key: str, audio: Path) -> str:
     object_key = slugify(f"diarize-{audio.stem}-{int(time.time())}")
-    media_uri = f"media://{object_key}"
-    resp = http_json("POST", f"{PYANNOTE_BASE}/media/input", api_key=api_key, body={"url": media_uri})
-    presigned = resp.get("url") or resp.get("presigned_url")
-    if not presigned:
-        raise RuntimeError(f"no presigned URL: {resp}")
-    log(f"uploading {audio.name} ({audio.stat().st_size} bytes) → {media_uri}")
-    http_json("PUT", presigned, body=audio.read_bytes(), content_type="application/octet-stream")
-    return media_uri
+    log(f"uploading {audio.name} ({audio.stat().st_size} bytes) → media://{object_key}")
+    return upload_to_pyannote(api_key, audio, object_key)
 
 
 def create_identify_job(api_key: str, media_uri: str, voiceprints: dict[str, str]) -> str:
@@ -118,22 +81,15 @@ def create_identify_job(api_key: str, media_uri: str, voiceprints: dict[str, str
 
 def poll_identify(api_key: str, job_id: str) -> list[dict]:
     log(f"polling identify job {job_id}…")
-    deadline = time.monotonic() + POLL_TIMEOUT_SEC
-    while True:
-        job = http_json("GET", f"{PYANNOTE_BASE}/jobs/{job_id}", api_key=api_key)
-        status = job.get("status")
-        if status == "succeeded":
-            output = job.get("output") or {}
-            segments = output.get("identification") or output.get("exclusiveDiarization") or output.get("diarization")
-            if not segments:
-                raise RuntimeError(f"succeeded job has no segments: {job}")
-            log(f"identify done: {len(segments)} segments")
-            return segments
-        if status in ("failed", "canceled"):
-            raise RuntimeError(f"identify job ended with status={status}: {job}")
-        if time.monotonic() > deadline:
-            raise TimeoutError(f"identify job {job_id} timed out (last status: {status})")
-        time.sleep(POLL_INTERVAL_SEC)
+    job = poll_job(api_key, job_id)
+    if job["status"] != "succeeded":
+        raise RuntimeError(f"identify job ended with status={job['status']}: {job}")
+    output = job.get("output") or {}
+    segments = output.get("identification") or output.get("exclusiveDiarization") or output.get("diarization")
+    if not segments:
+        raise RuntimeError(f"succeeded job has no segments: {job}")
+    log(f"identify done: {len(segments)} segments")
+    return segments
 
 
 def split_for_whisper(audio: Path, tmp_dir: Path) -> list[tuple[Path, float]]:
@@ -158,12 +114,6 @@ def split_for_whisper(audio: Path, tmp_dir: Path) -> list[tuple[Path, float]]:
         result.append((c, offset))
         offset += probe_duration(c)
     return result
-
-
-def compose_prompt(base: str, prev_tail: str) -> str:
-    """詞彙表 + 前一段結尾。whisper-1 只取最後 224 tokens，所以近期上下文放後面。"""
-    parts = [p for p in (base.strip(), prev_tail.strip()) if p]
-    return "\n".join(parts)
 
 
 def whisper_transcribe(audio: Path, api_key: str, language: str | None, offset: float = 0.0, prompt: str = "") -> list[dict]:
@@ -245,12 +195,6 @@ def merge(asr_segments: list[dict], dia_segments: list[dict]) -> list[dict]:
     return merged
 
 
-def fmt_time(seconds: float) -> str:
-    m, s = divmod(int(seconds), 60)
-    h, m = divmod(m, 60)
-    return f"{h:02d}:{m:02d}:{s:02d}"
-
-
 NO_SPEECH_MARK = "⚠ 無語音區段（疑似 ASR 幻覺，清理時預設刪除）"
 
 
@@ -311,12 +255,13 @@ def main() -> int:
     if not args.voiceprints.is_file():
         log(f"error: voiceprints not found: {args.voiceprints}")
         return 2
-    base_prompt = args.prompt
+    base_prompt = args.prompt.strip()
     if args.prompt_file:
         if not args.prompt_file.is_file():
             log(f"error: prompt file not found: {args.prompt_file}")
             return 2
-        base_prompt = compose_prompt(base_prompt, args.prompt_file.read_text(encoding="utf-8"))
+        glossary = args.prompt_file.read_text(encoding="utf-8").strip()
+        base_prompt = "\n".join(p for p in (base_prompt, glossary) if p)
 
     voiceprints = json.loads(args.voiceprints.read_text(encoding="utf-8"))
     if not voiceprints:
@@ -326,7 +271,7 @@ def main() -> int:
     duration = probe_duration(args.audio)
     log(f"audio: {args.audio.name}, {duration:.0f}s, {args.audio.stat().st_size / 1024 / 1024:.1f} MB")
 
-    media_uri = upload_to_pyannote(pyannote_key, args.audio)
+    media_uri = upload_audio(pyannote_key, args.audio)
     job_id = create_identify_job(pyannote_key, media_uri, voiceprints)
     log("running whisper ASR while identify job runs…")
     asr_segments = asr_with_timestamps(args.audio, openai_key, args.language, base_prompt)

@@ -61,22 +61,17 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/label_server.py" \
 
 ## 4. 建立 voiceprint 並寫入聲紋庫
 
-讀 `labels.json`，把有標名字的 clip 複製成以人名命名的檔案（`pyannote_voiceprint.py` 用 filename stem 當 label），再一次建立：
+使用者儲存後，直接把 `labels.json` 交給 `pyannote_voiceprint.py`——它會自己讀標記、對應 clips、驗證名字，不要手動複製或改名 clip：
 
 ```bash
-mkdir -p /tmp/voiceprint-setup/<basename>/named
-cp /tmp/voiceprint-setup/<basename>/clips/SPEAKER_00.wav /tmp/voiceprint-setup/<basename>/named/Alice.wav
-cp /tmp/voiceprint-setup/<basename>/clips/SPEAKER_02.wav /tmp/voiceprint-setup/<basename>/named/Bob.wav
-# …每個有標名字的 speaker 一個
-
-mkdir -p "$(dirname <voiceprints>)"
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/pyannote_voiceprint.py" \
-    /tmp/voiceprint-setup/<basename>/named/*.wav \
+    --labels /tmp/voiceprint-setup/<basename>/labels.json \
     --out <voiceprints> --merge
 ```
 
-- **一定加 `--merge`**：只新增/覆寫這次標記的成員，不會弄丟既有成員的聲紋。初次建立（檔案不存在）行為相同。
+- **一定加 `--merge`**：只新增/覆寫這次標記的成員，不會弄丟既有成員的聲紋。初次建立（檔案不存在）行為相同，輸出目錄會自動建立。
 - 標 `null`（略過）的 speaker 不處理。
+- 名字不合法（非英文字母開頭、含特殊字元）或重複（大小寫不敏感）時腳本會直接報錯——標記介面理論上已擋掉，真發生就回 §3 重新標記。
 
 ## 5. 驗證與回報
 
