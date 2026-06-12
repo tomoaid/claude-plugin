@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TomoAid Meeting Tools — 簡報</title>
+<style>
+  :root {
+    --bg: #0b0d12;
+    --panel: #12151d;
+    --panel-2: #171b25;
+    --line: #232936;
+    --text: #e9ecf3;
+    --muted: #98a2b6;
+    --accent: #5eead4;
+    --accent-2: #818cf8;
+    --warn: #fbbf24;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg); color: var(--text); overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang TC", "Noto Sans TC", sans-serif;
+    font-size: clamp(13px, 1.35vw, 19px);
+  }
+  .deck { position: fixed; inset: 0; }
+  .slide {
+    position: absolute; inset: 0; padding: 8vh 7vw 10vh;
+    display: flex; flex-direction: column; justify-content: center;
+    opacity: 0; transform: translateY(14px); pointer-events: none;
+    transition: opacity .35s ease, transform .35s ease;
+    background:
+      radial-gradient(900px 500px at 85% -10%, rgba(129,140,248,.10), transparent 60%),
+      radial-gradient(800px 500px at -10% 110%, rgba(94,234,212,.07), transparent 60%),
+      var(--bg);
+  }
+  .slide.active { opacity: 1; transform: none; pointer-events: auto; }
+
+  .kicker {
+    font-size: .72em; letter-spacing: .22em; text-transform: uppercase;
+    color: var(--accent); font-weight: 700; margin-bottom: 1.1em;
+  }
+  h1 { font-size: 3.4em; line-height: 1.12; letter-spacing: -.015em; font-weight: 800; }
+  h2 { font-size: 2.1em; line-height: 1.15; letter-spacing: -.01em; font-weight: 800; margin-bottom: .9em; }
+  .grad {
+    background: linear-gradient(92deg, var(--accent) 5%, var(--accent-2) 70%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .muted { color: var(--muted); }
+  code, .mono { font-family: var(--mono); }
+
+  .badge {
+    display: inline-flex; align-items: center; gap: .5em;
+    border: 1px solid var(--line); border-radius: 999px; padding: .45em 1em;
+    font-size: .78em; color: var(--muted); margin-bottom: 2.2em; background: rgba(255,255,255,.02);
+  }
+  .badge .dot { width: .55em; height: .55em; border-radius: 50%; background: var(--accent); }
+
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 1.3em 1.4em;
+  }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 2.6vw; align-items: start; }
+
+  /* ---- slide 1 ---- */
+  .s1 .sub { font-size: 1.25em; color: var(--muted); margin-top: 1.2em; max-width: 30em; line-height: 1.7; }
+  .cmdrow { display: flex; gap: 1em; margin-top: 2.6em; flex-wrap: wrap; }
+  .cmd {
+    font-family: var(--mono); font-size: .92em; color: var(--accent);
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: .65em 1.1em;
+  }
+  .cmd small { color: var(--muted); font-family: inherit; }
+  .wave { position: absolute; right: 6vw; bottom: 9vh; width: 30vw; opacity: .8; }
+
+  /* ---- slide 2 ---- */
+  .ba { display: flex; flex-direction: column; gap: 1em; }
+  .ba .label { font-size: .72em; letter-spacing: .15em; text-transform: uppercase; font-weight: 700; margin-bottom: .7em; }
+  .ba .before .label { color: var(--muted); }
+  .ba .after .label { color: var(--accent); }
+  .ba .before { opacity: .62; }
+  .ba .after { border-color: rgba(94,234,212,.35); box-shadow: 0 0 0 1px rgba(94,234,212,.12), 0 18px 50px -28px rgba(94,234,212,.25); }
+  .tline { font-family: var(--mono); font-size: .86em; line-height: 1.65; }
+  .tline + .tline { margin-top: .65em; }
+  .tline .sp { color: var(--accent-2); font-weight: 700; }
+  .tline .sp.named { color: var(--accent); }
+  .tline .ts { color: var(--muted); font-size: .9em; }
+  .feats { display: flex; flex-direction: column; gap: 1.05em; }
+  .feat { display: grid; grid-template-columns: 2.5em 1fr; gap: 1em; align-items: start; }
+  .feat .ic {
+    width: 2.2em; height: 2.2em; border-radius: 9px; display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(135deg, rgba(94,234,212,.14), rgba(129,140,248,.14));
+    border: 1px solid var(--line); color: var(--accent); font-size: 1em;
+  }
+  .feat b { display: block; margin-bottom: .25em; font-size: 1.02em; }
+  .feat p { color: var(--muted); font-size: .9em; line-height: 1.65; }
+
+  /* ---- slide 3 diagram ---- */
+  .diagram { width: 100%; max-width: 1180px; margin: 0 auto; }
+  .diagram text { font-family: -apple-system, "PingFang TC", sans-serif; }
+
+  /* ---- slide 4 steps ---- */
+  .steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1.1vw; margin-bottom: 2em; }
+  .step { position: relative; padding: 1.2em 1.2em 1.3em; }
+  .step .num {
+    font-family: var(--mono); font-weight: 700; color: var(--accent); font-size: .8em;
+    letter-spacing: .12em; margin-bottom: .8em;
+  }
+  .step b { display: block; font-size: 1em; margin-bottom: .45em; }
+  .step p { color: var(--muted); font-size: .84em; line-height: 1.6; }
+  .step::after {
+    content: "→"; position: absolute; right: -1em; top: 50%; transform: translateY(-50%);
+    color: var(--muted); font-size: 1.1em; z-index: 2;
+  }
+  .step:last-child::after { content: none; }
+  .chips { display: flex; gap: .8em; flex-wrap: wrap; }
+  .chip {
+    border: 1px solid var(--line); border-radius: 999px; padding: .5em 1em;
+    font-size: .82em; color: var(--muted); background: rgba(255,255,255,.02);
+  }
+  .chip b { color: var(--text); font-weight: 600; }
+  .mock { margin-top: 2em; max-width: 34em; }
+  .mock .mhead { font-family: var(--mono); font-size: .8em; color: var(--muted); margin-bottom: .8em; }
+  .mock .mbar { display: flex; align-items: center; gap: .8em; }
+  .mock .play { width: 2em; height: 2em; border-radius: 50%; background: var(--panel-2); border: 1px solid var(--line);
+    display: flex; align-items: center; justify-content: center; color: var(--accent); font-size: .85em; }
+  .mock .track { flex: 1; height: .45em; border-radius: 99px; background: var(--panel-2); position: relative; overflow: hidden; }
+  .mock .track::before { content: ""; position: absolute; inset: 0; width: 38%; background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
+  .mock .mrow { display: flex; gap: .8em; margin-top: 1em; align-items: center; }
+  .mock input { flex: 1; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px;
+    color: var(--text); font-size: .9em; padding: .55em .8em; font-family: inherit; }
+  .mock .skip { font-size: .82em; color: var(--muted); white-space: nowrap; }
+
+  /* ---- slide 5 ---- */
+  .term {
+    font-family: var(--mono); font-size: .86em; line-height: 1.75; padding: 1.2em 1.4em;
+    background: #0d1017; border: 1px solid var(--line); border-radius: 12px;
+  }
+  .term .p { color: var(--accent); }
+  .term .c { color: var(--muted); }
+  .term .ok { color: var(--accent); }
+  .term .warn { color: var(--warn); }
+  .principles { margin-top: 1.6em; display: flex; flex-direction: column; gap: .7em; }
+  .principles li { list-style: none; color: var(--muted); font-size: .92em; line-height: 1.6; padding-left: 1.4em; position: relative; }
+  .principles li::before { content: "✓"; position: absolute; left: 0; color: var(--accent); font-weight: 700; }
+  .principles li b { color: var(--text); font-weight: 600; }
+
+  /* ---- slide 6 ---- */
+  .s6 .grid2 { align-items: stretch; }
+  .plist { display: flex; flex-direction: column; gap: 1em; margin-top: .2em; }
+  .pitem { display: grid; grid-template-columns: 1.8em 1fr; gap: .8em; font-size: .92em; line-height: 1.65; color: var(--muted); }
+  .pitem .pi { color: var(--accent); font-weight: 700; }
+  .pitem b { color: var(--text); font-weight: 600; }
+  .install code {
+    display: block; font-family: var(--mono); font-size: .88em; color: var(--accent);
+    background: #0d1017; border: 1px solid var(--line); border-radius: 10px; padding: .7em 1em; margin-bottom: .7em;
+  }
+  .reqs { margin-top: 1.2em; }
+
+  /* ---- chrome ---- */
+  /* ---- print / PDF 匯出：每張投影片一頁 16:9 ----
+     全部用固定 px（頁面 = 1280×720 @96dpi），不用 vh/vw——
+     瀏覽器 Cmd+P 時 vh/vw 是按「視窗」而非頁面算，視窗比例不同就會跑版 */
+  @page { size: 1280px 720px; margin: 0; }
+  @media print {
+    html, body { overflow: visible; height: auto; font-size: 17px;
+      -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .deck { position: static; }
+    .slide { position: relative; inset: auto; width: 1280px; height: 720px;
+      padding: 58px 90px 72px;
+      opacity: 1; transform: none; pointer-events: auto;
+      page-break-after: always; break-inside: avoid; }
+    .slide:last-child { page-break-after: auto; }
+    .grid2 { gap: 33px; }
+    .steps { gap: 14px; }
+    .s1 .wave { width: 384px; right: 77px; bottom: 65px; }
+    .progress, .counter, .navhint, .footmark { display: none; }
+    /* Chrome print-to-PDF 對 background-clip:text 會出色塊，改實色 */
+    .grad { background: none; -webkit-background-clip: initial; background-clip: initial; color: var(--accent); }
+  }
+
+  .progress { position: fixed; top: 0; left: 0; height: 3px; background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    width: 0; transition: width .3s ease; z-index: 10; }
+  .counter { position: fixed; bottom: 3.2vh; right: 3.4vw; font-family: var(--mono); font-size: .78em; color: var(--muted); z-index: 10; }
+  .navhint { position: fixed; bottom: 3.2vh; left: 3.4vw; font-size: .75em; color: var(--muted); opacity: .6; z-index: 10; }
+  .footmark { position: fixed; bottom: 3.2vh; left: 50%; transform: translateX(-50%);
+    font-size: .72em; letter-spacing: .18em; text-transform: uppercase; color: var(--muted); opacity: .55; z-index: 10; }
+</style>
+</head>
+<body>
+<div class="progress" id="progress"></div>
+<div class="deck" id="deck">
+
+  <!-- 1 封面 -->
+  <section class="slide s1">
+    <div>
+      <div class="badge"><span class="dot"></span>Claude Code Plugin · tomoaid/claude-plugin</div>
+      <h1>TomoAid <span class="grad">Meeting Tools</span></h1>
+      <p class="sub">把會議錄音變成<b style="color:var(--text)">「知道誰說了什麼」</b>的結構化會議記錄，<br>全程在 Claude Code 裡完成。</p>
+      <div class="cmdrow">
+        <div class="cmd">/tomoaid:meeting-notes <small>錄音 → 會議記錄</small></div>
+        <div class="cmd">/tomoaid:voiceprint-setup <small>建立團隊聲紋庫</small></div>
+      </div>
+    </div>
+    <svg class="wave" viewBox="0 0 400 90" fill="none" aria-hidden="true">
+      <g stroke-linecap="round" stroke-width="5">
+        <line x1="10"  y1="35" x2="10"  y2="55" stroke="#2a3142"/><line x1="28" y1="25" x2="28" y2="65" stroke="#2a3142"/>
+        <line x1="46"  y1="15" x2="46"  y2="75" stroke="#34405a"/><line x1="64" y1="30" x2="64" y2="60" stroke="#34405a"/>
+        <line x1="82"  y1="20" x2="82"  y2="70" stroke="#41507a"/><line x1="100" y1="10" x2="100" y2="80" stroke="#4f5f99"/>
+        <line x1="118" y1="28" x2="118" y2="62" stroke="#5b6cb8"/><line x1="136" y1="18" x2="136" y2="72" stroke="#6877cf"/>
+        <line x1="154" y1="33" x2="154" y2="57" stroke="#7583e0"/><line x1="172" y1="12" x2="172" y2="78" stroke="#818cf8"/>
+        <line x1="190" y1="26" x2="190" y2="64" stroke="#79a0ef"/><line x1="208" y1="16" x2="208" y2="74" stroke="#6fb5e4"/>
+        <line x1="226" y1="31" x2="226" y2="59" stroke="#67c8da"/><line x1="244" y1="21" x2="244" y2="69" stroke="#5fd9d2"/>
+        <line x1="262" y1="35" x2="262" y2="55" stroke="#5eead4"/><line x1="280" y1="25" x2="280" y2="65" stroke="#5eead4"/>
+        <line x1="298" y1="38" x2="298" y2="52" stroke="#4cc9b6"/><line x1="316" y1="30" x2="316" y2="60" stroke="#3da899"/>
+        <line x1="334" y1="40" x2="334" y2="50" stroke="#2f877d"/><line x1="352" y1="35" x2="352" y2="55" stroke="#246a62"/>
+        <line x1="370" y1="42" x2="370" y2="48" stroke="#1b4f4a"/>
+      </g>
+    </svg>
+  </section>
+
+  <!-- 2 賣點 -->
+  <section class="slide">
+    <div class="kicker">Why</div>
+    <h2>逐字稿不該「全部混在一起」</h2>
+    <div class="grid2">
+      <div class="ba">
+        <div class="card before">
+          <div class="label">一般轉錄工具 — 沒有 speaker，一整段連在一起</div>
+          <div class="tline">我們先對齊Q2上線的範圍好那聲紋流程寫好了嗎寫好了下週可以測那這條誰來收我來吧對了客戶demo改到週四艾瑞克你有空嗎應該可以…</div>
+          <div class="tline" style="margin-top:.9em; color:var(--muted)">→ 誰說的？誰答應的？事後對不回去。</div>
+        </div>
+        <div class="card after">
+          <div class="label">TomoAid Meeting Tools — 同一段話</div>
+          <div class="tline"><span class="sp named">**Alice**</span> <span class="ts">[00:00:12–00:01:34]</span><br>我們先對齊 Q2 上線的範圍。聲紋流程寫好了嗎？</div>
+          <div class="tline"><span class="sp named">**Bob**</span> <span class="ts">[00:01:35–00:02:10]</span><br>寫好了，下週可以測。客戶 demo 改週四，Eric 你有空嗎？</div>
+        </div>
+      </div>
+      <div class="feats">
+        <div class="feat"><div class="ic">◉</div><div><b>具名 speaker，Action Items 直接對到人</b><p>pyannote.ai voiceprint 比對團隊聲紋庫，逐字稿直接標人名（外部來賓保留編號、不硬猜）。有了人名，會後可直接開單、assign 任務。</p></div></div>
+        <div class="feat"><div class="ic">Aa</div><div><b>詞彙表 priming</b><p>人名、產品名、術語餵給 ASR，專有名詞不再聽錯（Erica → Eric）；用繁體撰寫同時把輸出偏向繁體。</p></div></div>
+        <div class="feat"><div class="ic">⊕</div><div><b>官方對齊 + 幻覺標注</b><p>採 pyannote 官方 segment-level max-overlap 合併；無語音區段的 ASR 幻覺標 ⚠ 供清理，不無聲吞掉。</p></div></div>
+        <div class="feat"><div class="ic">∞</div><div><b>長音檔自動處理</b><p>超過 API 上限自動切段轉錄，段與段之間傳遞上下文；詞彙表在每段都優先保留。</p></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3 流程 -->
+  <section class="slide">
+    <div class="kicker">How it works</div>
+    <h2>兩路並行，max-overlap 對齊</h2>
+    <svg class="diagram" viewBox="0 0 1180 470" fill="none">
+      <defs>
+        <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,1 L9,5 L0,9" stroke="#5b657c" stroke-width="1.6" fill="none"/>
+        </marker>
+        <linearGradient id="ag" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stop-color="#5eead4"/><stop offset="1" stop-color="#818cf8"/>
+        </linearGradient>
+      </defs>
+
+      <!-- 錄音檔 -->
+      <rect x="30" y="185" width="160" height="100" rx="14" fill="#12151d" stroke="#232936"/>
+      <text x="110" y="228" text-anchor="middle" fill="#e9ecf3" font-size="21" font-weight="700">會議錄音</text>
+      <text x="110" y="256" text-anchor="middle" fill="#98a2b6" font-size="14" font-family="ui-monospace,monospace">.m4a .mp3 .wav…</text>
+
+      <!-- 分岔 -->
+      <path d="M190 235 C 230 235, 230 125, 268 125" stroke="#5b657c" stroke-width="1.6" marker-end="url(#arr)"/>
+      <path d="M190 235 C 230 235, 230 345, 268 345" stroke="#5b657c" stroke-width="1.6" marker-end="url(#arr)"/>
+
+      <!-- pyannote -->
+      <rect x="272" y="62" width="270" height="126" rx="14" fill="#12151d" stroke="#3b4663"/>
+      <text x="407" y="100" text-anchor="middle" fill="#a5b4fc" font-size="19" font-weight="700">pyannote.ai /v1/identify</text>
+      <text x="407" y="128" text-anchor="middle" fill="#98a2b6" font-size="14">聲紋庫 voiceprints.json 比對</text>
+      <text x="407" y="152" text-anchor="middle" fill="#98a2b6" font-size="14">上傳暫存 48h 自刪 · exclusive 模式</text>
+      <text x="407" y="176" text-anchor="middle" fill="#7c879c" font-size="13" font-family="ui-monospace,monospace">→ 誰在何時說話</text>
+
+      <!-- whisper -->
+      <rect x="272" y="282" width="270" height="126" rx="14" fill="#12151d" stroke="#2c5e57"/>
+      <text x="407" y="320" text-anchor="middle" fill="#5eead4" font-size="19" font-weight="700">OpenAI whisper-1</text>
+      <text x="407" y="348" text-anchor="middle" fill="#98a2b6" font-size="14">詞彙表 priming · segment 時間戳</text>
+      <text x="407" y="372" text-anchor="middle" fill="#98a2b6" font-size="14">&gt;25MB 自動切段、跨段傳上下文</text>
+      <text x="407" y="396" text-anchor="middle" fill="#7c879c" font-size="13" font-family="ui-monospace,monospace">→ 說了什麼（含時間）</text>
+
+      <!-- 並行 label -->
+      <text x="407" y="243" text-anchor="middle" fill="#5b657c" font-size="13" letter-spacing="3">並 行 執 行</text>
+
+      <!-- 匯流 -->
+      <path d="M542 125 C 590 125, 590 235, 628 235" stroke="#5b657c" stroke-width="1.6" marker-end="url(#arr)"/>
+      <path d="M542 345 C 590 345, 590 235, 628 235" stroke="#5b657c" stroke-width="1.6" marker-end="url(#arr)"/>
+
+      <!-- merge -->
+      <rect x="632" y="172" width="240" height="126" rx="14" fill="#12151d" stroke="url(#ag)" stroke-width="1.4"/>
+      <text x="752" y="212" text-anchor="middle" fill="#e9ecf3" font-size="19" font-weight="700">max-overlap 合併</text>
+      <text x="752" y="240" text-anchor="middle" fill="#98a2b6" font-size="14">每個 ASR 段配給重疊最多的 speaker</text>
+      <text x="752" y="264" text-anchor="middle" fill="#fbbf24" font-size="14">⚠ 無語音區段＝疑似幻覺，標注供清理</text>
+
+      <path d="M872 235 L 938 235" stroke="#5b657c" stroke-width="1.6" marker-end="url(#arr)"/>
+
+      <!-- 輸出 -->
+      <rect x="942" y="148" width="210" height="174" rx="14" fill="#12151d" stroke="#232936"/>
+      <text x="1047" y="186" text-anchor="middle" fill="#e9ecf3" font-size="19" font-weight="700">會議記錄 .md</text>
+      <text x="1047" y="216" text-anchor="middle" fill="#98a2b6" font-size="14">清理贅詞 / 幻覺 / 錯字</text>
+      <text x="1047" y="240" text-anchor="middle" fill="#98a2b6" font-size="14">決策 · Action Items</text>
+      <text x="1047" y="264" text-anchor="middle" fill="#98a2b6" font-size="14">Open Questions</text>
+      <text x="1047" y="296" text-anchor="middle" fill="#7c879c" font-size="13" font-family="ui-monospace,monospace">逐字稿另檔保存</text>
+    </svg>
+  </section>
+
+  <!-- 4 voiceprint-setup -->
+  <section class="slide">
+    <div class="kicker">/tomoaid:voiceprint-setup</div>
+    <h2>一段多人錄音，建好整個團隊的聲紋庫</h2>
+    <div class="steps">
+      <div class="card step"><div class="num">STEP 1</div><b>丟一段會議錄音</b><p>大家都有發言的多人會議最好，一次建立多位成員。</p></div>
+      <div class="card step"><div class="num">STEP 2</div><b>自動切出樣本</b><p>diarization 分段，每位 speaker 拼接最長片段（≤ 29 秒）。</p></div>
+      <div class="card step"><div class="num">STEP 3</div><b>網頁試聽標人名</b><p>本地標記介面逐段試聽、填英文名；非成員勾略過。<b style="color:var(--accent)">名字一定由人來標。</b></p></div>
+      <div class="card step"><div class="num">STEP 4</div><b>寫入聲紋庫</b><p><span class="mono">voiceprints.json</span>，<span class="mono">--merge</span> 增量更新、不動既有成員。</p></div>
+    </div>
+    <div class="card mock">
+      <div class="mhead">SPEAKER_01 · 總發言 42s · 樣本 28.6s</div>
+      <div class="mbar"><div class="play">▶</div><div class="track"></div></div>
+      <div class="mrow"><input value="Alice" readonly><span class="skip">☐ 略過</span></div>
+    </div>
+    <div class="chips" style="margin-top:1.6em">
+      <span class="chip"><b>何時重跑：</b>新成員加入 · 連續被標 UNKNOWN（聲紋失準）</span>
+      <span class="chip"><b>隱私：</b>voiceprint 是不可逆 feature vector，無法還原成原音</span>
+    </div>
+  </section>
+
+  <!-- 5 meeting-notes -->
+  <section class="slide">
+    <div class="kicker">/tomoaid:meeting-notes</div>
+    <h2>之後每場會議，一句話</h2>
+    <div class="grid2">
+      <div>
+        <div class="term">
+          <span class="p">›</span> /tomoaid:meeting-notes ./recordings/2026-06-11.m4a<br><br>
+          <span class="ok">✓</span> 會議記錄&nbsp;&nbsp;meetings/2026-06-11-q2-kickoff.md<br>
+          <span class="ok">✓</span> 逐字稿&nbsp;&nbsp;&nbsp;&nbsp;meetings/transcripts/…-transcript.md<br>
+          <span class="ok">✓</span> 音檔&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;meetings/recordings/…m4a <span class="c">（自動 gitignore）</span><br><br>
+          <span class="warn">⚠</span> 不確定的點：<br>
+          <span class="c">&nbsp;&nbsp;- 12:34 處聽不清，已標 […]</span><br>
+          <span class="c">&nbsp;&nbsp;- 「待指派 Owner」共 2 條，請決定 owner</span>
+        </div>
+      </div>
+      <div>
+        <ul class="principles">
+          <li><b>摘要與分節依內容判斷</b>，不硬套模板；沿用專案既有會議記錄慣例。</li>
+          <li><b>Action Items 不外推 owner</b>——沒明確指派就進「待指派 Owner」，不替團隊做分工決定。</li>
+          <li><b>清理是去蕪存菁，不是壓縮</b>——保留所有資訊、數字與觀點；不確定的點統一列給你 review。</li>
+          <li><b>腳本失敗就停</b>，不憑檔名腦補會議內容；pyannote 中途掛掉自動降級為 plain 逐字稿並說明。</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 6 隱私與安裝 -->
+  <section class="slide s6">
+    <div class="kicker">Privacy & Setup</div>
+    <h2>上手前要知道的事</h2>
+    <div class="grid2">
+      <div class="card">
+        <b style="display:block; margin-bottom:1em">隱私</b>
+        <div class="plist">
+          <div class="pitem"><span class="pi">›</span><span><b>音檔會離開你的機器</b>：轉錄送 OpenAI、diarization 送 pyannote.ai（暫存 48 小時自動刪除）。敏感會議自行評估。</span></div>
+          <div class="pitem"><span class="pi">›</span><span><b>Voiceprint 不可逆</b>，但屬生物特徵資料——存私有 repo，取得成員同意後再建立。</span></div>
+          <div class="pitem"><span class="pi">›</span><span><b>音檔不進 git</b>：輸出時自動加入 .gitignore，只留在本機；逐字稿與會議記錄是文字檔，可搜尋、可 review。</span></div>
+        </div>
+      </div>
+      <div class="card install">
+        <b style="display:block; margin-bottom:1em">安裝</b>
+        <code>/plugin marketplace add tomoaid/claude-plugin</code>
+        <code>/plugin install tomoaid@tomoaid</code>
+        <div class="reqs plist">
+          <div class="pitem"><span class="pi">›</span><span><b>需求</b>：<span class="mono">OPENAI_API_KEY</span> · <span class="mono">PYANNOTEAI_API_KEY</span> · ffmpeg · Python 3.10+（免 pip install）</span></div>
+          <div class="pitem"><span class="pi">›</span><span><b>團隊用</b>：寫進專案 <span class="mono">.claude/settings.json</span>，隊友 clone 即自動啟用（project scope）。</span></div>
+          <div class="pitem"><span class="pi">›</span><span><b>第一次</b>先跑 voiceprint-setup 建聲紋庫，之後每場會議一句 meeting-notes。</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<div class="counter" id="counter"></div>
+<div class="navhint">← → 翻頁</div>
+<div class="footmark">TomoAid Meeting Tools</div>
+
+<script>
+const slides = [...document.querySelectorAll('.slide')];
+const counter = document.getElementById('counter');
+const progress = document.getElementById('progress');
+let cur = Math.min(slides.length - 1, Math.max(0, (parseInt(location.hash.slice(1), 10) || 1) - 1));
+
+function show(i) {
+  cur = Math.min(slides.length - 1, Math.max(0, i));
+  slides.forEach((s, j) => s.classList.toggle('active', j === cur));
+  counter.textContent = `${cur + 1} / ${slides.length}`;
+  progress.style.width = `${((cur + 1) / slides.length) * 100}%`;
+  history.replaceState(null, '', `#${cur + 1}`);
+}
+addEventListener('keydown', e => {
+  if (['ArrowRight', 'ArrowDown', ' ', 'PageDown'].includes(e.key)) { e.preventDefault(); show(cur + 1); }
+  if (['ArrowLeft', 'ArrowUp', 'PageUp'].includes(e.key)) { e.preventDefault(); show(cur - 1); }
+  if (e.key === 'Home') show(0);
+  if (e.key === 'End') show(slides.length - 1);
+});
+addEventListener('click', e => {
+  if (e.target.closest('a, input, button')) return;
+  show(e.clientX > innerWidth / 2 ? cur + 1 : cur - 1);
+});
+show(cur);
+</script>
+</body>
+</html>

@@ -11,11 +11,10 @@
 
 ## 特色
 
-- **具名 speaker**：用 pyannote.ai voiceprint 比對，逐字稿直接標 `**Alice** [00:00:12–00:00:34]`，不是匿名的 SPEAKER_00
+- **具名 speaker**：用 pyannote.ai voiceprint 比對，逐字稿直接標 `**Alice** [00:00:12–00:00:34]`，不是匿名的 SPEAKER_00；Action Items 直接對到人，會後可接著開單指派任務
 - **官方對齊邏輯**：採 pyannote 官方 segment-level max-overlap 合併 diarization 與 ASR；無語音區段的 ASR 幻覺會被標注供清理
 - **詞彙表 priming**：人名、產品名、術語透過 prompt 餵給 ASR，大幅減少專有名詞聽錯；用繁體撰寫同時把輸出偏向繁體
 - **長音檔自動切段**：超過 API 上限自動切段轉錄，段與段之間傳遞上下文
-- **不碰 git**：產出只到本地檔案，commit / PR 由你自己決定
 
 ## 安裝
 
