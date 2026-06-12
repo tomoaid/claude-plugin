@@ -4,12 +4,12 @@
 Pipeline:
   1. Upload local audio to pyannote temp storage
   2. POST /v1/identify with team voiceprints (exclusive=true) → jobId
-  3. Send audio to OpenAI whisper-1 (verbose_json, word+segment timestamps)
+  3. Send audio to OpenAI whisper-1 (verbose_json, segment timestamps)
      while the identify job runs, then poll /v1/jobs/{jobId} until succeeded
-  4. Merge: word-level speaker assignment — one ASR segment spanning a speaker
-     change is split at the word boundary; segments with zero overlap against
-     any pyannote speech region are flagged as suspected hallucination
-     (pyannote 未偵測到語音), not silently kept or dropped
+  4. Merge: segment-level max-overlap speaker assignment (official pyannote
+     tutorial logic); segments with zero overlap against any pyannote speech
+     region are flagged as suspected hallucination (pyannote 未偵測到語音),
+     not silently kept or dropped
 
 --prompt / --prompt-file primes whisper with names/jargon (寫繁體可同時把輸出
 偏向繁體). whisper-1 只取 prompt 的最後 224 tokens；切段模式下每段 prompt 會
@@ -166,7 +166,7 @@ def compose_prompt(base: str, prev_tail: str) -> str:
     return "\n".join(parts)
 
 
-def whisper_transcribe(audio: Path, api_key: str, language: str | None, offset: float = 0.0, prompt: str = "") -> tuple[list[dict], list[dict]]:
+def whisper_transcribe(audio: Path, api_key: str, language: str | None, offset: float = 0.0, prompt: str = "") -> list[dict]:
     cmd = [
         "curl", "-sS", "--fail-with-body",
         "--config", "-",  # Authorization 走 stdin，key 不進 ps 可見的 argv
@@ -175,7 +175,6 @@ def whisper_transcribe(audio: Path, api_key: str, language: str | None, offset: 
         "-F", "model=whisper-1",
         "-F", "response_format=verbose_json",
         "-F", "timestamp_granularities[]=segment",
-        "-F", "timestamp_granularities[]=word",
     ]
     if language:
         cmd += ["-F", f"language={language}"]
@@ -194,18 +193,13 @@ def whisper_transcribe(audio: Path, api_key: str, language: str | None, offset: 
         data = json.loads(proc.stdout)
     except json.JSONDecodeError as e:
         raise RuntimeError(f"Bad JSON from API: {proc.stdout[:500]}") from e
-    segments = [
+    return [
         {"start": s["start"] + offset, "end": s["end"] + offset, "text": s["text"].strip()}
         for s in data.get("segments") or []
     ]
-    words = [
-        {"start": w["start"] + offset, "end": w["end"] + offset, "word": w["word"]}
-        for w in data.get("words") or []
-    ]
-    return segments, words
 
 
-def asr_with_timestamps(audio: Path, api_key: str, language: str | None, prompt: str = "") -> tuple[list[dict], list[dict]]:
+def asr_with_timestamps(audio: Path, api_key: str, language: str | None, prompt: str = "") -> list[dict]:
     size = audio.stat().st_size
     if size <= WHISPER_MAX_BYTES:
         log(f"whisper: single shot ({size / 1024 / 1024:.1f} MB)")
@@ -213,7 +207,6 @@ def asr_with_timestamps(audio: Path, api_key: str, language: str | None, prompt:
     log(f"whisper: file too large ({size / 1024 / 1024:.1f} MB), splitting…")
     import tempfile
     segments: list[dict] = []
-    words: list[dict] = []
     with tempfile.TemporaryDirectory() as tmp:
         chunks = split_for_whisper(audio, Path(tmp))
         log(f"split into {len(chunks)} chunks")
@@ -221,12 +214,11 @@ def asr_with_timestamps(audio: Path, api_key: str, language: str | None, prompt:
         for i, (chunk, offset) in enumerate(chunks, 1):
             cs = chunk.stat().st_size
             log(f"  chunk {i}/{len(chunks)} ({cs / 1024 / 1024:.1f} MB, +{offset:.0f}s)")
-            segs, ws = whisper_transcribe(chunk, api_key, language, offset,
-                                          prompt=compose_prompt(prompt, prev_tail))
+            segs = whisper_transcribe(chunk, api_key, language, offset,
+                                      prompt=compose_prompt(prompt, prev_tail))
             segments.extend(segs)
-            words.extend(ws)
             prev_tail = " ".join(s["text"] for s in segs).strip()[-CONTEXT_TAIL_CHARS:]
-    return segments, words
+    return segments
 
 
 def overlap_speaker(start: float, end: float, dia_sorted: list[dict]) -> str | None:
@@ -239,59 +231,17 @@ def overlap_speaker(start: float, end: float, dia_sorted: list[dict]) -> str | N
     return max(overlap.items(), key=lambda x: x[1])[0] if overlap else None
 
 
-def merge(asr_segments: list[dict], dia_segments: list[dict], words: list[dict] | None = None) -> list[dict]:
-    """Word-level speaker assignment.
+def merge(asr_segments: list[dict], dia_segments: list[dict]) -> list[dict]:
+    """Segment-level max-overlap speaker assignment（官方 tutorial 邏輯）.
 
-    每個 ASR segment 先抓出它時間範圍內的 words，逐字配 speaker；segment 內
-    speaker 不一致就在字邊界切開。配不到任何語音區段的字先用鄰字 speaker 補；
-    整個 segment 都配不到 → speaker=UNKNOWN + no_speech=True（疑似幻覺，
-    交給下游清理階段決定去留）。words 缺失時 fallback 到 segment-level 配法。
+    每個 ASR segment 配給重疊最多的 speaker；與所有語音區段零重疊 →
+    speaker=UNKNOWN + no_speech=True（疑似幻覺，交給下游清理階段決定去留）。
     """
     dia_sorted = sorted(dia_segments, key=lambda x: x["start"])
-    words = sorted(words or [], key=lambda w: w["start"])
     merged: list[dict] = []
-    wi = 0  # moving index into words（兩邊都按時間排序）
     for seg in sorted(asr_segments, key=lambda s: s["start"]):
-        ss, se = seg["start"], seg["end"]
-        while wi < len(words) and (words[wi]["start"] + words[wi]["end"]) / 2 < ss:
-            wi += 1
-        wj = wi
-        while wj < len(words) and (words[wj]["start"] + words[wj]["end"]) / 2 <= se:
-            wj += 1
-        seg_words = words[wi:wj]
-        wi = wj
-
-        if not seg_words:  # 無 word 資料（API 沒回 words 或對不上）→ segment-level
-            sp = overlap_speaker(ss, se, dia_sorted)
-            merged.append({**seg, "speaker": sp or "UNKNOWN", "no_speech": sp is None})
-            continue
-
-        speakers = [overlap_speaker(w["start"], w["end"], dia_sorted) for w in seg_words]
-        if all(sp is None for sp in speakers):
-            merged.append({**seg, "speaker": "UNKNOWN", "no_speech": True})
-            continue
-        # 零星配不到的字（segment 邊緣、短停頓）用前一個字的 speaker 補，開頭用後面的
-        for k in range(len(speakers)):
-            if speakers[k] is None:
-                speakers[k] = speakers[k - 1] if k > 0 and speakers[k - 1] else next(
-                    (sp for sp in speakers[k:] if sp), None)
-
-        if len(set(speakers)) == 1:  # 整段同一人 → 沿用 segment 原文（標點完整）
-            merged.append({**seg, "speaker": speakers[0], "no_speech": False})
-            continue
-        # 跨講者 → 依字邊界切 run；run 文字由 words 重組（切點處標點可能略失真）
-        run_start = 0
-        for k in range(1, len(speakers) + 1):
-            if k == len(speakers) or speakers[k] != speakers[run_start]:
-                run_words = seg_words[run_start:k]
-                merged.append({
-                    "start": run_words[0]["start"],
-                    "end": run_words[-1]["end"],
-                    "text": "".join(w["word"] for w in run_words).strip(),
-                    "speaker": speakers[run_start],
-                    "no_speech": False,
-                })
-                run_start = k
+        sp = overlap_speaker(seg["start"], seg["end"], dia_sorted)
+        merged.append({**seg, "speaker": sp or "UNKNOWN", "no_speech": sp is None})
     return merged
 
 
@@ -379,16 +329,16 @@ def main() -> int:
     media_uri = upload_to_pyannote(pyannote_key, args.audio)
     job_id = create_identify_job(pyannote_key, media_uri, voiceprints)
     log("running whisper ASR while identify job runs…")
-    asr_segments, asr_words = asr_with_timestamps(args.audio, openai_key, args.language, base_prompt)
-    log(f"whisper done: {len(asr_segments)} segments, {len(asr_words)} words")
+    asr_segments = asr_with_timestamps(args.audio, openai_key, args.language, base_prompt)
+    log(f"whisper done: {len(asr_segments)} segments")
     dia_segments = poll_identify(pyannote_key, job_id)
 
-    merged = merge(asr_segments, dia_segments, asr_words)
+    merged = merge(asr_segments, dia_segments)
     transcript = render_transcript(merged)
 
     if args.raw_out:
         args.raw_out.write_text(
-            json.dumps({"diarization": dia_segments, "asr": asr_segments, "words": asr_words, "merged": merged}, ensure_ascii=False, indent=2),
+            json.dumps({"diarization": dia_segments, "asr": asr_segments, "merged": merged}, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
         log(f"raw → {args.raw_out}")

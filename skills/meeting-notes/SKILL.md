@@ -84,7 +84,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/diarize_merge.py" \
     --language zh
 ```
 
-腳本內部流程：上傳音檔到 pyannote.ai 暫存區 → `/v1/identify` 用 `exclusive=true` 配 voiceprints 識別 → poll 到 succeeded → 同時把音檔送 OpenAI whisper-1（verbose_json，需要時間戳所以**不能用 gpt-4o-transcribe**；prompt 帶入詞彙表 priming 人名與術語）→ **逐字（word-level）**把 ASR 配給對應 speaker，一句橫跨兩人時在字邊界切開 → 連續同 speaker 合併段落 → 輸出 markdown。
+腳本內部流程：上傳音檔到 pyannote.ai 暫存區 → `/v1/identify` 用 `exclusive=true` 配 voiceprints 識別 → poll 到 succeeded → 同時把音檔送 OpenAI whisper-1（verbose_json，需要時間戳所以**不能用 gpt-4o-transcribe**；prompt 帶入詞彙表 priming 人名與術語）→ 依官方 segment-level max-overlap 把每個 ASR segment 配給重疊最多的 speaker → 連續同 speaker 合併段落 → 輸出 markdown。
 
 `--prompt-file` 一律帶詞彙表 `<glossary>`（檔案不存在就略過這個參數，並在最後回報建議建立——範例見 `${CLAUDE_PLUGIN_ROOT}/examples/asr-glossary.example.md`）。
 
